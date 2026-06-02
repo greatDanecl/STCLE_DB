@@ -6,6 +6,44 @@ El objetivo del proyecto es transformar automáticamente los roles mensuales de 
 
 ---
 
+# Estructura del Repositorio
+
+```text
+stcle-dashboard/
+│
+├── .github/
+│   └── workflows/
+│       └── build-data.yml
+│
+├── data/
+│   │
+│   ├── raw/
+│   │   ├── Publicado_CABLU_MAY26.xlsx
+│   │   ├── Roles_EFECT_MAY26_PUB_JUN26.xlsx
+│   │   └── ...
+│   │
+│   ├── kpis.json
+│   ├── analytics.json
+│   ├── alerts.json
+│   └── metadata.json
+│
+├── scripts/
+│   └── build-data.mjs
+│
+├── assets/
+│   ├── logo.png
+│   └── icons/
+│
+├── index.html
+├── app.js
+├── styles.css
+├── package.json
+└── README.md
+```
+
+---
+
+
 # Características Principales
 
 ## Vista Personal
@@ -324,44 +362,6 @@ GitHub Pages
  ↓
 Dashboard
 ```
-
----
-
-# Estructura del Repositorio
-
-```text
-stcle-dashboard/
-│
-├── .github/
-│   └── workflows/
-│       └── build-data.yml
-│
-├── data/
-│   │
-│   ├── raw/
-│   │   ├── Publicado_CABLU_MAY26.xlsx
-│   │   ├── Roles_EFECT_MAY26_PUB_JUN26.xlsx
-│   │   └── ...
-│   │
-│   ├── kpis.json
-│   ├── analytics.json
-│   ├── alerts.json
-│   └── metadata.json
-│
-├── scripts/
-│   └── build-data.mjs
-│
-├── assets/
-│   ├── logo.png
-│   └── icons/
-│
-├── index.html
-├── app.js
-├── styles.css
-├── package.json
-└── README.md
-```
-
 ---
 
 # Archivos JSON Generados
