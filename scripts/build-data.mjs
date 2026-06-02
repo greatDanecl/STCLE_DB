@@ -9,6 +9,12 @@ const DETAIL_DIR = "data/detail";
 const ABSENCE_CODES = new Set(["SICK", "VAC", "OOF"]);
 const ADMIN_CODES = new Set(["ADM","ASCCBT","CLA","CRM","CRS","DIT","EMG","IET","MCK","MTC","MTE","MTI","MTU","SVC"]);
 const REST_CODES = new Set(["B", "BB", "BL", "OFF", "DO"]);
+const WHITE_CODES = new Set(["B"]);
+
+const MONTHS = {
+  ENE: "01", JAN: "01", FEB: "02", MAR: "03", ABR: "04", APR: "04", MAY: "05", JUN: "06",
+  JUL: "07", AGO: "08", AUG: "08", SEP: "09", SEPT: "09", SET: "09", OCT: "10", NOV: "11", DIC: "12", DEC: "12"
+};
 
 function ensureDir(dir) { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); }
 function s(v) { return String(v ?? "").trim(); }
@@ -18,8 +24,16 @@ function localYMD(d) { return d ? `${d.getFullYear()}-${pad(d.getMonth()+1)}-${p
 function localHM(d) { return d ? `${pad(d.getHours())}:${pad(d.getMinutes())}` : ""; }
 function ym(d) { return d ? `${d.getFullYear()}-${pad(d.getMonth()+1)}` : ""; }
 function round(n, dec=2) { const p = 10 ** dec; return Math.round(Number(n || 0) * p) / p; }
-function normalizeCrewId(v) { const raw = s(v); if (!raw) return ""; return raw.replace(/^0+(?=\d)/, ""); }
+function normalizeCrewId(v) { const raw = s(v); if (!raw) return ""; return raw.replace(/\.0$/, "").replace(/^0+(?=\d)/, ""); }
 function get(row, names) { for (const name of names) if (row[name] !== undefined && row[name] !== null && row[name] !== "") return row[name]; return ""; }
+
+function makeNombre(row) {
+  const direct = s(get(row, ["Nombre completo", "nombre_completo", "Nombre", "name"]));
+  if (direct) return direct.replace(/\s+/g, " ").trim();
+  const first = s(get(row, ["First Name", "first_name", "FIRST NAME"]));
+  const last = s(get(row, ["Last Name", "last_name", "LAST NAME"]));
+  return `${last} ${first}`.replace(/\s+/g, " ").trim();
+}
 
 function toDate(value) {
   if (!value && value !== 0) return null;
@@ -29,7 +43,7 @@ function toDate(value) {
     return p ? new Date(p.y, p.m - 1, p.d) : null;
   }
   let txt = u(value);
-  const monthMap = { ENE:"JAN", ABR:"APR", AGO:"AUG", DIC:"DEC" };
+  const monthMap = { ENE:"JAN", ABR:"APR", AGO:"AUG", DIC:"DEC", SEPT:"SEP", SET:"SEP" };
   for (const [es, en] of Object.entries(monthMap)) txt = txt.replace(es, en);
   const d = new Date(txt);
   return isNaN(d) ? null : d;
@@ -37,6 +51,7 @@ function toDate(value) {
 
 function toTime(value) {
   if (!value && value !== 0) return "";
+  if (value instanceof Date && !isNaN(value)) return `${pad(value.getHours())}:${pad(value.getMinutes())}`;
   if (typeof value === "number") {
     const total = Math.round(value * 24 * 60);
     return `${pad(Math.floor(total / 60) % 24)}:${pad(total % 60)}`;
@@ -56,16 +71,42 @@ function combineDateTime(dateValue, timeValue) {
   return out;
 }
 
-function blockHours(v) {
+function excelDurationToHours(n) {
+  // Excel guarda duraciones horarias como fracción del día: 01:57 = 0,08125.
+  // Si el valor es menor a 1, se interpreta como duración Excel y se multiplica por 24.
+  // Si es mayor o igual a 1, se interpreta como horas decimales ya convertidas.
+  if (!Number.isFinite(n)) return 0;
+  if (n > 0 && n < 1) return n * 24;
+  return n;
+}
+
+function blockHours(v, fieldName="") {
   if (v === null || v === undefined || v === "") return 0;
-  if (typeof v === "number") return round(v);
+  if (typeof v === "number") {
+    if (String(fieldName).toLowerCase().includes("block_hours")) return round(v);
+    return round(excelDurationToHours(v));
+  }
+  if (v instanceof Date && !isNaN(v)) return round(v.getHours() + v.getMinutes() / 60 + v.getSeconds() / 3600);
   const txt = s(v);
+  if (!txt || txt.toLowerCase() === "nan") return 0;
   if (txt.includes(":")) {
-    const [h, m] = txt.split(":").map(Number);
-    return round((h || 0) + (m || 0) / 60);
+    const [h, m, sec] = txt.split(":").map(Number);
+    return round((h || 0) + (m || 0) / 60 + (sec || 0) / 3600);
   }
   const n = Number(txt.replace(",", "."));
-  return Number.isFinite(n) ? round(n) : 0;
+  if (!Number.isFinite(n)) return 0;
+  if (String(fieldName).toLowerCase().includes("block_hours")) return round(n);
+  return round(excelDurationToHours(n));
+}
+
+function getBlockValue(row) {
+  const candidates = ["block_hours", "Block Hours", "Block Time", "block_time", "BLOCK TIME"];
+  for (const name of candidates) {
+    if (row[name] !== undefined && row[name] !== null && row[name] !== "") {
+      return { value: row[name], field: name };
+    }
+  }
+  return { value: "", field: "" };
 }
 
 function fleet(v) {
@@ -75,9 +116,19 @@ function fleet(v) {
   return code;
 }
 
+function inferPeriodFromFile(fileName) {
+  const f = u(fileName).normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const y = f.match(/(20\d{2})/)?.[1] || (f.match(/(\d{2})/) ? `20${f.match(/(\d{2})/)[1]}` : "");
+  for (const [mon, mm] of Object.entries(MONTHS)) {
+    const re = new RegExp(`(^|[^A-Z])${mon}([^A-Z]|$)`);
+    if (re.test(f)) return y ? `${y}-${mm}` : "";
+  }
+  return "";
+}
+
 function roleType(row, fileName) {
   const direct = u(get(row, ["tipo_rol", "Tipo Rol", "tipo rol"]));
-  if (direct.includes("EJEC")) return "Ejecutado";
+  if (direct.includes("EJEC") || direct.includes("EFECT")) return "Ejecutado";
   if (direct.includes("PUB")) return "Publicado";
   const f = u(fileName);
   if (f.includes("EFECT") || f.includes("EJEC")) return "Ejecutado";
@@ -88,22 +139,28 @@ function isFlight(code) { return /^LA\d+/i.test(code); }
 function isASB(code) { return /^ASB\d*$/i.test(code); }
 function isHSB(code) { return /^HSB\d*$/i.test(code); }
 function isRest(code) { return REST_CODES.has(code); }
+function isWhite(code) { return WHITE_CODES.has(code); }
 
 function normalizeRow(row, fileName) {
   const start = combineDateTime(get(row, ["Str Dt", "str_dt", "start_date", "fecha_inicio"]), get(row, ["Str Tm", "str_tm", "start_time", "hora_inicio"]));
   let end = combineDateTime(get(row, ["End Dt", "end_dt", "end_date", "fecha_fin"]), get(row, ["End Tm", "end_tm", "end_time", "hora_fin"]));
   if (start && end && end < start) end = new Date(end.getTime() + 86400000);
 
-  const periodoDate = toDate(get(row, ["periodo", "Periodo", "PERIODO"]));
+  const periodoRaw = get(row, ["periodo_norm", "periodo", "Periodo", "PERIODO"]);
+  const periodoDate = toDate(periodoRaw);
+  const filePeriod = inferPeriodFromFile(fileName);
+  const periodo = periodoDate ? ym(periodoDate) : (filePeriod || ym(start));
+
   const actividad = u(get(row, ["Activity", "activity_code", "Code IFN", "code_ifn", "actividad"]));
   const cargo = u(get(row, ["Rank", "rank_code", "cargo"]));
   const tipo = roleType(row, fileName);
+  const b = getBlockValue(row);
 
   return {
     crew_id: normalizeCrewId(get(row, ["Staff Num", "crew_id", "Crew ID", "id"])),
-    nombre: s(get(row, ["Nombre completo", "nombre_completo", "Nombre", "name"])),
+    nombre: makeNombre(row),
     cargo,
-    periodo: periodoDate ? ym(periodoDate) : ym(start),
+    periodo,
     tipo_rol: tipo,
     actividad,
     fecha_inicio: localYMD(start),
@@ -112,10 +169,11 @@ function normalizeRow(row, fileName) {
     hora_fin: localHM(end),
     start_ms: start ? start.getTime() : null,
     end_ms: end ? end.getTime() : null,
-    fleet: fleet(get(row, ["Fleet", "aircraft_type_desc", "fleet_raw"])),
-    block_hours: blockHours(get(row, ["Block Time", "block_time", "block_hours"])),
+    fleet: fleet(get(row, ["Fleet", "aircraft_type_desc", "fleet_raw", "fleet_operacional"])),
+    block_hours: blockHours(b.value, b.field),
     es_vuelo: isFlight(actividad),
     es_descanso: isRest(actividad),
+    es_blanco: isWhite(actividad),
     es_turno_aeropuerto: isASB(actividad),
     es_turno_casa: isHSB(actividad),
     es_ausencia: ABSENCE_CODES.has(actividad),
@@ -128,14 +186,16 @@ function readAllRows() {
   const files = fs.existsSync(RAW_DIR) ? fs.readdirSync(RAW_DIR).filter(f => f.toLowerCase().endsWith(".xlsx")) : [];
   const rows = [];
   for (const file of files) {
+    if (/normalizado|dashboard|kpis|metadata|alerts|analytics/i.test(file)) continue;
     const full = path.join(RAW_DIR, file);
     const workbook = XLSX.readFile(full, { cellDates: true });
     for (const sheetName of workbook.SheetNames) {
-      const json = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "" });
+      const json = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "", raw: true });
       if (!json.length) continue;
       for (const row of json) {
         const r = normalizeRow(row, file);
         if ((!r.crew_id && !r.nombre) || !r.periodo || !r.cargo) continue;
+        if (!r.actividad) continue;
         rows.push(r);
       }
     }
@@ -189,11 +249,13 @@ function countPSVNC(rows, tipoRol) {
 }
 
 function buildKpis(rows) {
-  const groups = groupBy(rows, r => `${r.periodo}|${r.cargo}|${r.crew_id}`);
+  const groups = groupBy(rows, r => `${r.periodo}|${r.cargo}|${r.crew_id || r.nombre}`);
   const out = [];
   for (const [key, g] of groups) {
-    const [periodo, cargo, crew_id] = key.split("|");
-    const nombre = g.find(r => r.nombre)?.nombre || "";
+    const [periodo, cargo, personKey] = key.split("|");
+    const first = g.find(r => r.nombre) || g[0];
+    const crew_id = first.crew_id || personKey;
+    const nombre = first.nombre || crew_id;
     const pub = g.filter(r => r.tipo_rol === "Publicado");
     const eje = g.filter(r => r.tipo_rol === "Ejecutado");
     const ausenciaDias = daysWith(g, r => r.es_ausencia);
@@ -209,13 +271,14 @@ function buildKpis(rows) {
       periodo, cargo, crew_id, nombre,
       horas_programadas: hp,
       horas_efectuadas: he,
+      diferencia_horas: round(he - hp),
       utilizacion_pct: hp ? round(he / hp * 100, 1) : 0,
       dias_trabajados_programado: diasTrabPub,
       dias_trabajados_ejecutado: diasTrabEje,
       horas_promedio_dia_programado: diasTrabPub ? round(hp / diasTrabPub) : 0,
       horas_promedio_dia_ejecutado: diasTrabEje ? round(he / diasTrabEje) : 0,
       descansos: count(pub, r => r.es_descanso),
-      blancos: count(pub, r => r.actividad === "B"),
+      blancos: count(pub, r => r.es_blanco),
       turnos_asb: asb,
       turnos_hsb: hsb,
       turnos_total: asb + hsb,
@@ -292,24 +355,31 @@ function buildAnalytics(rows, kpis) {
   const top_turnos = [...active].sort((a,b) => b.turnos_total - a.turnos_total).slice(0,100)
     .map(k => ({ periodo:k.periodo, cargo:k.cargo, crew_id:k.crew_id, nombre:k.nombre, turnos_asb:k.turnos_asb, turnos_hsb:k.turnos_hsb, turnos_total:k.turnos_total }));
 
-  const blancos = [...active].sort((a,b) => b.descansos - a.descansos).slice(0,100)
+  const descansos = [...active].sort((a,b) => b.descansos - a.descansos).slice(0,100)
     .map(k => ({ periodo:k.periodo, cargo:k.cargo, crew_id:k.crew_id, nombre:k.nombre, descansos:k.descansos, blancos:k.blancos }));
 
   const heat = new Map();
-  for (const r of rows.filter(r => r.tipo_rol === "Ejecutado" && !r.es_descanso && !r.es_ausencia && r.fecha_inicio)) {
+  const executedRows = rows.filter(r => r.tipo_rol === "Ejecutado");
+  const heatSource = executedRows.length ? executedRows : rows.filter(r => r.tipo_rol === "Publicado");
+  for (const r of heatSource.filter(r => !r.es_descanso && !r.es_ausencia && r.fecha_inicio)) {
     const key = `${r.periodo}|${r.cargo}|${r.fecha_inicio}`;
     heat.set(key, (heat.get(key) || 0) + 1);
   }
   const heatmap = [...heat.entries()].map(([key, valor]) => { const [periodo,cargo,fecha] = key.split("|"); return { periodo, cargo, fecha, valor }; })
     .sort((a,b) => a.fecha.localeCompare(b.fecha));
 
-  return { sindicato_periodos, ranking_psvnc, top_turnos, distribucion_descansos: blancos, heatmap };
+  return { sindicato_periodos, ranking_psvnc, top_turnos, distribucion_descansos: descansos, heatmap };
 }
 
 function buildMetadata(rows, kpis, alerts) {
   const periodos = uniq(rows.map(r => r.periodo)).sort();
   const cargos = uniq(rows.map(r => r.cargo)).sort();
-  const personas = uniq(kpis.map(k => `${k.crew_id}|${k.nombre}|${k.cargo}`)).map(x => { const [crew_id,nombre,cargo] = x.split("|"); return { crew_id, nombre, cargo }; }).sort((a,b) => a.nombre.localeCompare(b.nombre));
+  const personasMap = new Map();
+  for (const k of kpis) {
+    if (!k.nombre) continue;
+    if (!personasMap.has(k.crew_id)) personasMap.set(k.crew_id, { crew_id: k.crew_id, nombre: k.nombre, cargo: k.cargo });
+  }
+  const personas = [...personasMap.values()].sort((a,b) => a.nombre.localeCompare(b.nombre));
   return {
     ultima_actualizacion: new Date().toISOString(),
     periodos,
@@ -317,11 +387,11 @@ function buildMetadata(rows, kpis, alerts) {
     meses: uniq(periodos.map(p => p.slice(5,7))).sort(),
     cargos,
     personas,
-    total_tripulantes: uniq(rows.map(r => r.crew_id)).length,
+    total_tripulantes: personas.length,
     registros_fuente: rows.length,
     registros_kpi: kpis.length,
     total_alertas: alerts.length,
-    modelo: "compact-v3-sin-dashboard-json"
+    modelo: "compact-v4-sin-dashboard-json-horas-corregidas"
   };
 }
 
@@ -359,4 +429,5 @@ console.log("JSON generados correctamente sin dashboard.json pesado");
 console.log(`rows fuente: ${rows.length}`);
 console.log(`kpis: ${kpis.length}`);
 console.log(`alerts: ${alerts.length}`);
+console.log(`modelo: ${metadata.modelo}`);
 console.log(`detail JSON: ${process.env.GENERATE_DETAIL_JSON === "true" ? metadata.periodos.length + " periodos" : "omitido"}`);
