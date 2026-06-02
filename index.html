@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>STCLE Analytics Dashboard</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="hero">
+    <div class="brand">
+      <img src="assets/logo.png" alt="Logo STCLE" />
+      <div>
+        <h1>STCLE Analytics Dashboard</h1>
+        <p>Programación, productividad, turnos y fatiga operacional</p>
+      </div>
+    </div>
+    <div class="updated" id="updated">Actualizando...</div>
+  </header>
+
+  <main>
+    <section class="panel filters">
+      <label>Año<select id="yearFilter"></select></label>
+      <label>Mes<select id="monthFilter"></select></label>
+      <label>Cargo<select id="rankFilter"></select></label>
+      <label>Persona<select id="personFilter"></select></label>
+    </section>
+
+    <nav class="tabs">
+      <button class="tab active" data-tab="personal">Vista personal</button>
+      <button class="tab" data-tab="sindicato">Análisis sindicato</button>
+      <button class="tab" data-tab="alertas">Alertas</button>
+    </nav>
+
+    <section id="personal" class="tabpane active">
+      <div class="kpi-grid" id="personalKpis"></div>
+      <div class="grid two">
+        <article class="panel"><h2>Personal vs promedio cargo</h2><div id="compareBars" class="bars"></div></article>
+        <article class="panel"><h2>Activación de turnos</h2><div id="activationGauge" class="gauge"></div></article>
+      </div>
+      <div class="grid two">
+        <article class="panel"><h2>Evolución horas por cargo</h2><div id="hoursTrend"></div></article>
+        <article class="panel"><h2>Ranking PSVNC</h2><div id="psvncRanking"></div></article>
+      </div>
+    </section>
+
+    <section id="sindicato" class="tabpane">
+      <div class="kpi-grid" id="unionKpis"></div>
+      <div class="grid two">
+        <article class="panel"><h2>Análisis agregado por cargo</h2><div id="unionTable"></div></article>
+        <article class="panel"><h2>Heatmap actividad ejecutada</h2><div id="heatmap"></div></article>
+      </div>
+      <div class="grid two">
+        <article class="panel"><h2>Top 10 turnos programados</h2><div id="topTurns"></div></article>
+        <article class="panel"><h2>Distribución de descansos/blancos</h2><div id="restsDistribution"></div></article>
+      </div>
+    </section>
+
+    <section id="alertas" class="tabpane">
+      <article class="panel"><h2>Centro de alertas</h2><div id="alertsList"></div></article>
+    </section>
+  </main>
+
+  <footer>Dashboard demo STCLE · Generado con GitHub Actions · Sin servicios externos</footer>
+  <script src="app.js"></script>
+</body>
+</html>
