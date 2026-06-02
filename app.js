@@ -28,8 +28,12 @@ function setupFilters(){
 function setOptions(id, arr){ $(id).innerHTML = arr.map(x => `<option value="${escapeAttr(x)}">${escapeHtml(x)}</option>`).join(''); }
 function updatePeople(){
   const rows = filteredKpis(false);
-  const people = [...new Map(rows.map(r => [r.crew_id, `${r.nombre} · ${r.cargo}`])).entries()].sort((a,b) => a[1].localeCompare(b[1]));
-  setOptions('personFilter', ['Todos', ...people.map(([id, label]) => `${id}|${label}`)]);
+  const people = [...new Map(rows.map(r => [r.crew_id, r.nombre])).entries()].sort((a,b) => a[1].localeCompare(b[1]));
+  $('personFilter').innerHTML = ['Todos', ...people.map(([id, nombre]) => ({ id, nombre }))]
+    .map(x => typeof x === 'string'
+      ? `<option value="Todos">Todos</option>`
+      : `<option value="${escapeAttr(x.id)}">${escapeHtml(x.nombre)}</option>`
+    ).join('');
 }
 function setupTabs(){ document.querySelectorAll('.tab').forEach(b => b.addEventListener('click', () => { document.querySelectorAll('.tab,.tabpane').forEach(x => x.classList.remove('active')); b.classList.add('active'); $(b.dataset.tab).classList.add('active'); })); }
 function filteredKpis(includePerson=true){
@@ -38,7 +42,7 @@ function filteredKpis(includePerson=true){
     if(state.filters.year !== 'Todos' && y !== state.filters.year) return false;
     if(state.filters.month !== 'Todos' && m !== state.filters.month) return false;
     if(state.filters.rank !== 'Todos' && r.cargo !== state.filters.rank) return false;
-    if(includePerson && state.filters.person !== 'Todos' && r.crew_id !== state.filters.person.split('|')[0]) return false;
+    if(includePerson && state.filters.person !== 'Todos' && r.crew_id !== state.filters.person) return false;
     return true;
   });
 }
@@ -112,7 +116,7 @@ function matchesFilter(r){
   if(state.filters.year !== 'Todos' && y !== state.filters.year) return false;
   if(state.filters.month !== 'Todos' && m !== state.filters.month) return false;
   if(state.filters.rank !== 'Todos' && r.cargo !== state.filters.rank) return false;
-  if(state.filters.person !== 'Todos' && r.crew_id && r.crew_id !== state.filters.person.split('|')[0]) return false;
+  if(state.filters.person !== 'Todos' && r.crew_id && r.crew_id !== state.filters.person) return false;
   return true;
 }
 function avgOf(rows, field){ return rows.length ? rows.reduce((a,r)=>a+Number(r[field]||0),0)/rows.length : 0; }
